@@ -2,30 +2,27 @@ package com.atleastitworks.ejemplo_signals;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.collection.CircularArray;
 import androidx.core.app.ActivityCompat;
 
 import android.Manifest;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
+import android.os.Process;
 
 
-import com.github.mikephil.charting.charts.BarChart;
+
 import com.github.mikephil.charting.charts.LineChart;
-import com.github.mikephil.charting.components.AxisBase;
 import com.github.mikephil.charting.components.XAxis;
-import com.github.mikephil.charting.data.BarData;
-import com.github.mikephil.charting.data.BarDataSet;
-import com.github.mikephil.charting.data.BarEntry;
+import com.github.mikephil.charting.components.YAxis;
 import com.github.mikephil.charting.data.Entry;
 import com.github.mikephil.charting.data.LineData;
 import com.github.mikephil.charting.data.LineDataSet;
 import com.github.mikephil.charting.interfaces.datasets.ILineDataSet;
-import com.github.mikephil.charting.utils.ColorTemplate;
 
 import org.jtransforms.fft.DoubleFFT_1D;
 
@@ -35,17 +32,78 @@ import static java.lang.Math.sqrt;
 
 public class MainActivity extends AppCompatActivity {
 
+    // Defino los buffers, potencia de 2 para mas placer y por la FFT
+    private int POW_FREC_SHOW = 10;
+    private int POW_TIME_SHOW = 8;
+    private int POW_FFT_BUFFER = 16;
 
-    private int BUFFER_SIZE_SHOW_FREQ = (int) Math.pow(2,10);
-    private int BUFFER_SIZE_SHOW_TIME = (int) Math.pow(2,8);
-    private int BUFFER_SIZE = (int) Math.pow(2,16);
+    private int BUFFER_SIZE_SHOW_FREQ = (int) Math.pow(2,POW_FREC_SHOW);
+    private int BUFFER_SIZE_SHOW_TIME = (int) Math.pow(2,POW_TIME_SHOW);
+    private int BUFFER_SIZE = (int) Math.pow(2,POW_FFT_BUFFER);
+
+
+    // Creamos la clase para hacer la FFT
+    // ver:  https://github.com/wendykierp/JTransforms
+    // Para que esto ande debemos poner la ependencia en "build.gradle (Module: app)" :
+    // dentro de "dependencies" ponemos:
+    // implementation 'com.github.wendykierp:JTransforms:3.1'
+    private DoubleFFT_1D fft = new DoubleFFT_1D(BUFFER_SIZE);
+    // Este es el buffer de entrada a la FFT, que quiere doubles...
+    double[] buffer_double = new double[BUFFER_SIZE];
+
+
+    // Declaramos la clase para grabar audio
+    private AudioRecord ar = null;
+    private int SAMPLE_RATE = 44100; // en Hz
+    // Buffer donde sale el valor crudo del microfono
+    short[] buffer = new short[BUFFER_SIZE];
+
+    // Con este flag avisamos que hay data nueva a la FFT, es un semaforo mal hecho
+    boolean buffer_ready = false;
+
+    // Con esto activo o desactivo el funcionamiento del programa (todo)
+    boolean stopped = false;
 
 
 
 
+
+
+    // Aca abajo van las declaraciones de ploteo....
+    // ver: https://github.com/PhilJay/MPAndroidChart
+    // Para que esto ande debemos poner la ependencia en "build.gradle (Module: app)" :
+    // dentro de "dependencies" ponemos:
+    // implementation 'com.github.PhilJay:MPAndroidChart:v2.2.4'
+
+    // Cada cuanto refrescamos el plot, lo calculamos en funcion del tamaño de los buffers
+    // y la frecuencia de muestreo
+    private int PLOTS_REFRESH_MS;
+    // Esta variable la uso para recorrer la salida del microfono
+    private int buffer_counter = 0;
+
+
+    //  Creamos las clases del grafico de tiempo
+    private LineChart grafico_tiempo;
+    private ArrayList<Entry> LineEntry_tiempo = new ArrayList<>(BUFFER_SIZE_SHOW_TIME);
+    private ArrayList<String> labels_tiempo = new ArrayList<>(BUFFER_SIZE_SHOW_TIME);
+    LineDataSet dataSet_tiempo;
+    LineData data_tiempo;
+
+    // Creamos las clases del grafico de FFT
+    private LineChart grafico_frecuencia;
+    private ArrayList<Entry> LineEntry_frecuencia = new ArrayList<>(BUFFER_SIZE_SHOW_FREQ);
+    private ArrayList<String> labels_frecuencia = new ArrayList<>(BUFFER_SIZE_SHOW_FREQ);
+    LineDataSet dataSet_frec;
+    LineData data_frec;
+
+
+    // Estas funciones de aca abajo salen de la documentación de Android, es un metodo
+    // que pide permisos de microfono
+
+    // Flag del pedido
     private static final int REQUEST_RECORD_AUDIO_PERMISSION = 200;
 
-    // Requesting permission to RECORD_AUDIO
+    // Pedimos permiso para grabar audio RECORD_AUDIO
     private boolean permissionToRecordAccepted = false;
     private String [] permissions = {Manifest.permission.RECORD_AUDIO};
 
@@ -61,128 +119,101 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    //////////////////////////////////
-
-    private AudioRecord ar = null;
-    private int minSize;
-    private int SAMPLE_RATE = 44100;
-
-    short[] buffer = new short[BUFFER_SIZE];
-    private int buffer_counter = 0;
-
-    boolean stopped = false;
-    double[] buffer_double = new double[BUFFER_SIZE];
-
-    /////////////////////////////
-
-
-    boolean buffer_ready = false;
-
-    private int PLOTS_REFRESH_MS = 25;
 
 
 
 
-
-    private LineChart grafico_tiempo;
-    private LineChart grafico_frecuencia;
-
-    private ArrayList<Entry> LineEntry_tiempo = new ArrayList<>(BUFFER_SIZE_SHOW_TIME);
-    private ArrayList<String> labels_tiempo = new ArrayList<>(BUFFER_SIZE_SHOW_TIME);
-
-    private ArrayList<Entry> LineEntry_frecuencia = new ArrayList<>(BUFFER_SIZE_SHOW_FREQ);
-    private ArrayList<String> labels_frecuencia = new ArrayList<>(BUFFER_SIZE_SHOW_FREQ);
-
-
-    LineDataSet dataSet_frec;
-    LineData data_frec;
-    LineDataSet dataSet_tiempo;
-    LineData data_tiempo;
-
-    private double[] buffer_frec = new double[BUFFER_SIZE_SHOW_FREQ];
-
-    private int count_frec = 0;
-    private int count_tiempo = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Bloqueamos la pantalla siempre en modo retrato
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+
+        // Buscamos las implementaciones en el activity_main.xml de los dos graficos
         grafico_tiempo = findViewById(R.id.line_chart_tiempo);
         grafico_frecuencia = findViewById(R.id.line_chart_frecuencia);
 
-
-        ///////////////////////////
-
+        // Pedimos permiso para grabar audio
         ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION);
 
-        ///////////////////////////
-
-
-//        minSize= AudioRecord.getMinBufferSize(BUFFER_SIZE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-//        ar = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,minSize);
-//        ar = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, BUFFER_SIZE);
-//        ar.startRecording();
-
-
+        // Llenamos los buffers de señal a plotear con nada...
         for(int i=0;i<BUFFER_SIZE_SHOW_TIME;i++)
         {
             LineEntry_tiempo.add(new Entry(0.0f, i));
             labels_tiempo.add(String.valueOf(i));
         }
-
         for(int i=0;i<BUFFER_SIZE_SHOW_FREQ;i++)
         {
             LineEntry_frecuencia.add(new Entry(0.0f, i));
             labels_frecuencia.add(String.valueOf(i));
         }
 //
-
-
+        // Cargamos los datos en la clase que grafica
         dataSet_frec = new LineDataSet(LineEntry_frecuencia, "Frecuencia");
         data_frec = new LineData(labels_frecuencia, dataSet_frec);
 
-        dataSet_tiempo = new LineDataSet(LineEntry_tiempo, "Frecuencia");
+        dataSet_tiempo = new LineDataSet(LineEntry_tiempo, "Tiempo");
         data_tiempo = new LineData(labels_tiempo, dataSet_tiempo);
 
 
+        // Calculamos el tiempo de refresco de display para mostrar toda la señal antes que
+        // se termine de grabar. No es en tiempo real, por lo que se ve mal a veces...
         PLOTS_REFRESH_MS = (int) ((((float)BUFFER_SIZE/(float)SAMPLE_RATE) / (float) BUFFER_SIZE_SHOW_TIME)*1000.0);
 
 
-
-//        dataSet.setColors(ColorTemplate.COLORFUL_COLORS);
-
-//
-//        chart.setDescription("");    // Hide the description
-//        chart.getAxisLeft().setDrawLabels(false);
-//        chart.getAxisRight().setDrawLabels(false);
-//        chart.getXAxis().setDrawLabels(false);
-
-//        chart.getLegend().setEnabled(false);   // Hide the legend
-//
-//        // enable / disable grid background
-//        grafico_tiempo.setDrawGridBackground(true);
-//
-//        // enable touch gestures
-//        grafico_tiempo.setTouchEnabled(true);
-//
-//        // enable scaling and dragging
-//        grafico_tiempo.setDragEnabled(true);
-//        grafico_tiempo.setScaleEnabled(true);
-
-//        float minXRange = 0;
-//        float maxXRange = 10;
-//        grafico_tiempo.setVisibleXRange(minXRange, maxXRange);
+        // Seteamos los datos iniciales en los graficos
+        grafico_tiempo.setData(data_tiempo);
+        grafico_frecuencia.setData(data_frec);
 
 
-        grafico_tiempo.getAxisLeft().setAxisMaxValue(1024.0f);
-        grafico_tiempo.getAxisLeft().setAxisMinValue(-1024.0f);
+        // Configuramos los ejes de los graficos (Esto es cosmetico mas que nada)
+        XAxis xl = grafico_tiempo.getXAxis();
+        xl.setTextColor(Color.WHITE);
+        xl.setDrawGridLines(false);
+        xl.setAvoidFirstLastClipping(true);
+        xl.setSpaceBetweenLabels(5);
+        xl.setEnabled(true);
 
-//        chart.setDescription("lalala");
+        YAxis leftAxis = grafico_tiempo.getAxisLeft();
+        leftAxis.setTextColor(Color.BLACK);
+        leftAxis.setAxisMaxValue((float) Math.pow(2,10));
+        leftAxis.setAxisMinValue((float) -Math.pow(2,10));
+        leftAxis.setDrawGridLines(true);
+
+        YAxis rightAxis = grafico_tiempo.getAxisRight();
+        rightAxis.setEnabled(false);
+
+        grafico_tiempo.setDescription("Señal temporal");
 
 
 
+        XAxis xl_f = grafico_frecuencia.getXAxis();
+        xl_f.setTextColor(Color.WHITE);
+        xl_f.setDrawGridLines(true);
+        xl_f.setAvoidFirstLastClipping(true);
+        xl_f.setSpaceBetweenLabels(5);
+        xl_f.setEnabled(true);
+
+        YAxis leftAxis_f = grafico_frecuencia.getAxisLeft();
+        leftAxis_f.setTextColor(Color.BLACK);
+        leftAxis_f.setDrawGridLines(true);
+
+        YAxis rightAxis_f = grafico_frecuencia.getAxisRight();
+        rightAxis_f.setEnabled(false);
+
+        grafico_frecuencia.setDescription("FFT");
+
+
+
+
+
+        // Como tiene que funcionar en paralelo, necesitamos un par de threads
+
+        // Este thread espera que el grabador de audio termine y hace la FFT. Solo mira el flag,
+        // si esta en flase vuelve a dormir y si es true hace FFT.
         new Thread(new Runnable() {
 
             @Override
@@ -204,8 +235,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }).start();
 
-
-
+        // Este thread va a estar siempre grabando audio
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -213,34 +243,16 @@ public class MainActivity extends AppCompatActivity {
             }
         }).start();
 
-//        new Thread(new Runnable() {
-//
-//            @Override
-//            public void run() {
-////                for(int i = 0; i < 500; i++) {
-//                while (true) {
-//                    runOnUiThread(new Runnable() {
-//                        @Override
-//                        public void run() {
-//                            getTime();
-//                        }
-//                    });
-//
-//                    try {
-//                        Thread.sleep(50);
-//                    } catch (InterruptedException e) {
-//                    }
-//                }
-//            }
-//        }).start();
-
-
+        // Con este thread vamos a refrescar los graficos con la nueva informacion
         new Thread(new Runnable() {
 
             @Override
             public void run() {
-//                for(int i = 0; i < 500; i++) {
+
+                android.os.Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
+
                 while (true) {
+
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -258,52 +270,56 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
+
+
+
+
+
+    // Este método hace la FFT
     private void calcFFT()
     {
-
+        // Solo si hay nuevos datos en el buffer...
         if (buffer_ready)
         {
-            // Here's the Fast Fourier Transform from JTransforms
-            DoubleFFT_1D fft = new DoubleFFT_1D(BUFFER_SIZE);
-
-            // Pasamos a double
+            // Pasamos a double como quiere la clase FFT
             for (int i = 0; i < BUFFER_SIZE; i++)
             {
                 buffer_double[i] = buffer[i];
             }
 
-            // Will store FFT in 'samplesD'
+            // HAcemos la FFT. La salida va a estar en el mismo buffer. Solo saca la parte
+            // real (izquierda) de la FFT, intercalando la salida real y la imaginaria.
             fft.realForward(buffer_double);
 
+
+            // Terminamos de procesar el buffer, reseteamos el flag
             buffer_ready = false;
 
-
-            // obtenemos el modulo y mostramos
+            // obtenemos el modulo y mostramos en el grafico de FFT
             int buffer_mod_count = 0;
             for (int i = 0; i < BUFFER_SIZE_SHOW_FREQ; i++)
             {
                 // calculamos el modulo
                 double aux_mod = sqrt(buffer_double[buffer_mod_count]*buffer_double[buffer_mod_count] + buffer_double[buffer_mod_count+1]*buffer_double[buffer_mod_count+1]);
-                buffer_mod_count += 16;
 
+                // Adelantamos el index del buffer con un paso grande, submuestreando la salida real
+                // asi no colgamos el grafico con muchos puntos.
+                buffer_mod_count += 2^(POW_FFT_BUFFER-POW_FREC_SHOW);
+
+                // Borramos el dato
                 dataSet_frec.removeFirst();
+                // Agregamos un nuevo
                 dataSet_frec.addEntry(new Entry((float) aux_mod, i));
             }
 
-
+            // Actualizamos el dataset
             data_frec.removeDataSet(0);
             data_frec.addDataSet(dataSet_frec);
-//        data_frec = new LineData(labels_frecuencia, dataSet_frec);
-
             grafico_frecuencia.setData(data_frec);
 
-            data_frec.notifyDataChanged(); // let the data know a dataSet changed
+            // Le avisamos que cambio y que lo actualice
+            data_frec.notifyDataChanged();
             dataSet_frec.notifyDataSetChanged();
-
-//        dataSet.setColors(ColorTemplate.COLORFUL_COLORS);
-
-
-
             grafico_frecuencia.invalidate();
         }
 
@@ -316,48 +332,33 @@ public class MainActivity extends AppCompatActivity {
     private void getTime()
     {
 
-//        ar.read(buffer, 0, minSize);
-//        ar.read(buffer, 0, BUFFER_SIZE);
-
-//        short[] buf_aux = new short[1];
-//        ar.read(buf_aux, 0, 1);
-//        buffer[buffer_counter] = buf_aux[0];
-//        buffer_counter++;
-//
-//        if (buffer_counter >= BUFFER_SIZE)
-//            buffer_counter = 0;
-
-
+        // Seteamos la prioridad
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioRecord recorder = null;
-        short[][]   buffers  = new short[256][160];
-        int         ix       = 0;
 
-        try { // ... initialise
+        // intentamos crear el grqabador de audio y grabar...
+        try {
 
-            int N = AudioRecord.getMinBufferSize(SAMPLE_RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
-
+            // Creamos el grabador
             recorder = new AudioRecord(MediaRecorder.AudioSource.MIC,
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
                     BUFFER_SIZE);
 
+            // Empezamos a grabar
             recorder.startRecording();
 
-            // ... loop
-
+            // Mientras no me digan que pare...
             while(!stopped) {
-                //short[] buffer = buffers[ix++ % buffers.length];
 
-                N = recorder.read(buffer,0,BUFFER_SIZE);
+                // Leo las muestras de audio
+                recorder.read(buffer,0,BUFFER_SIZE);
 
-
-                //process is what you will do with the data...not defined here
-                //process(buffer);
+                // Si llego aca es que hay nueva info, seteo el flag para la FFT
                 buffer_ready = true;
 
-
+                // Reinicio el indice del plot de señal temporal
                 buffer_counter = 0;
             }
         } catch(Throwable x) {
@@ -371,110 +372,32 @@ public class MainActivity extends AppCompatActivity {
 
     private void mostrar_signals()
     {
-        // Tiempo
-//        for(int i=0;i<BUFFER_SIZE_SHOW_TIME;i++)
-//        {
-//            LineEntry_tiempo.set(i, new Entry((float) buffer[buffer_counter+i], i));
-//            labels_tiempo.set(i, String.valueOf(i));
-//        }
-//        buffer_counter++;
-//
-//        LineDataSet dataSet_timepo = new LineDataSet(LineEntry_tiempo, "Tiempo");
-//
-//        LineData data_timepo = new LineData(labels_tiempo, dataSet_timepo);
-//
-//        grafico_tiempo.setData(data_timepo);
-//
-//        grafico_tiempo.invalidate();
 
+        // Obtengo los datos actuales del grafico
+        LineData data = grafico_tiempo.getData();
 
-        dataSet_tiempo.removeFirst();
-        dataSet_tiempo.addEntry(new Entry((float) buffer[buffer_counter], count_tiempo));
+        if (data != null) {
+            // Obtengo el dataset actual
+            ILineDataSet set = data.getDataSetByIndex(0);
 
-        data_tiempo.removeDataSet(0);
-        data_tiempo.addDataSet(dataSet_tiempo);
+            // Agrego una entrada
+            data.addXValue(String.valueOf(data.getXValCount() + 1));
+            data.addEntry(new Entry((float) buffer[buffer_counter], set.getEntryCount()), 0);
 
-        buffer_counter+= (int) (PLOTS_REFRESH_MS/1000.0)*SAMPLE_RATE;
+            // Le avisamos al grefico que cambio el dataset
+            grafico_tiempo.notifyDataSetChanged();
 
+            // Limitamos el numero de muestras a mostrar
+            grafico_tiempo.setVisibleXRangeMaximum(BUFFER_SIZE_SHOW_TIME);
 
-        data_tiempo.notifyDataChanged(); // let the data know a dataSet changed
-        dataSet_tiempo.notifyDataSetChanged();
+            // nos movemos al final
+            grafico_tiempo.moveViewToX(data.getXValCount() - BUFFER_SIZE_SHOW_TIME + 1);
 
-//        dataSet.setColors(ColorTemplate.COLORFUL_COLORS);
-        grafico_tiempo.setData(data_tiempo);
+            // Actualizamos el indice de ploteo de buffer
+            buffer_counter++;
 
+        }
 
-        grafico_tiempo.invalidate();
-
-        count_tiempo++;
-        buffer_counter++;
-        if (count_tiempo >= BUFFER_SIZE_SHOW_TIME)
-            count_tiempo = 0;
-
-
-        // Frecuencia
-//        double min = -10.0;
-//        double max = 10.0;
-//        double random = min + Math.random() * (max - min);
-
-//
-//        int Limit_buff = BUFFER_SIZE_SHOW_FREQ;
-//        if (count_frec < BUFFER_SIZE_SHOW_FREQ)
-//        {
-//            buffer_frec[count_frec] = random;
-//        }
-//        else
-//        {
-//            for(int i=1;i<Limit_buff;i++)
-//            {
-//                buffer_frec[i-1] = buffer_frec[i];
-//            }
-//            buffer_frec[Limit_buff-1] = random;
-//
-//        }
-
-//        ArrayList<Entry> LineEntry_aux = new ArrayList<>(BUFFER_SIZE);
-//        ArrayList<String> labels_aux = new ArrayList<>(BUFFER_SIZE);
-//        for(int i=0;i<Limit_buff;i++)
-//        {
-//            LineEntry_aux.add( new Entry((float) buffer_frec[i], i));
-//            labels_aux.add( String.valueOf(i));
-//        }
-
-//        for(int i=0;i<Limit_buff;i++)
-//        {
-//            LineEntry_frecuencia.set(i,  new Entry((float) buffer_frec[i], i));
-//            labels_frecuencia.set(i, String.valueOf(i));
-//
-//
-//        }
-
-
-//        LineDataSet dataSet_frec;
-//        LineData data_frec;
-
-//        dataSet_frec.removeFirst();
-//        dataSet_frec.addEntry(new Entry((float) random, count_frec));
-//
-//        data_frec.removeDataSet(0);
-//        data_frec.addDataSet(dataSet_frec);
-////        data_frec = new LineData(labels_frecuencia, dataSet_frec);
-//
-//
-//        data_frec.notifyDataChanged(); // let the data know a dataSet changed
-//        dataSet_frec.notifyDataSetChanged();
-//
-////        dataSet.setColors(ColorTemplate.COLORFUL_COLORS);
-//        grafico_frecuencia.setData(data_frec);
-//
-//
-//        grafico_frecuencia.invalidate();
-//
-//        count_frec++;
-//        if (count_frec>=BUFFER_SIZE_SHOW_FREQ)
-//            count_frec = 0;
     }
-
-
 
 }
