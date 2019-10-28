@@ -5,6 +5,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -13,7 +14,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Process;
-
+import android.widget.Toast;
 
 
 import com.github.mikephil.charting.charts.LineChart;
@@ -31,6 +32,17 @@ import java.util.ArrayList;
 import static java.lang.Math.sqrt;
 
 public class MainActivity extends AppCompatActivity {
+
+    private boolean USE_CPP_FFT = true;
+    private boolean USE_JAVA_FFT = false;
+
+    static
+    {
+        System.loadLibrary("signal_proces-lib");
+    }// carga la libreria signal_proces-lib.so
+
+    private native String getNativeString(); // Esta funcion esta contenida en la libreria
+    private native double[] calcularFFT(short[] input, int elementos);
 
     // Defino los buffers, potencia de 2 para mas placer y por la FFT
     private int POW_FREC_SHOW = 10;
@@ -132,6 +144,22 @@ public class MainActivity extends AppCompatActivity {
         // Bloqueamos la pantalla siempre en modo retrato
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
 
+
+
+
+
+        Context context = getApplicationContext();
+        CharSequence text = getNativeString();
+        int duration = Toast.LENGTH_SHORT;
+
+        Toast toast = Toast.makeText(context, text, duration);
+        toast.show();
+
+
+
+
+
+
         // Buscamos las implementaciones en el activity_main.xml de los dos graficos
         grafico_tiempo = findViewById(R.id.line_chart_tiempo);
         grafico_frecuencia = findViewById(R.id.line_chart_frecuencia);
@@ -220,12 +248,21 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
 //                for(int i = 0; i < 500; i++) {
                 while (true) {
-                    runOnUiThread(new Runnable() {
+
+                    if (USE_JAVA_FFT)
+                        runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             calcFFT();
                         }
                     });
+                    else if (USE_CPP_FFT)
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                calcFFT_Cpp();
+                            }
+                        });
 
                     try {
                         Thread.sleep(100);
@@ -271,7 +308,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+    // Este método hace la FFT, en Cpp
+    private void calcFFT_Cpp()
+    {
+        // Solo si hay nuevos datos en el buffer...
+        if (buffer_ready)
+        {
+            buffer_double = calcularFFT(buffer, BUFFER_SIZE);
 
+            updateFFT_values();
+
+            // Terminamos de procesar el buffer, reseteamos el flag
+            buffer_ready = false;
+        }
+    }
 
 
 
@@ -292,40 +342,44 @@ public class MainActivity extends AppCompatActivity {
             fft.realForward(buffer_double);
 
 
+            updateFFT_values();
+
             // Terminamos de procesar el buffer, reseteamos el flag
             buffer_ready = false;
 
-            // obtenemos el modulo y mostramos en el grafico de FFT
-            int buffer_mod_count = 0;
-            for (int i = 0; i < BUFFER_SIZE_SHOW_FREQ; i++)
-            {
-                // calculamos el modulo
-                double aux_mod = sqrt(buffer_double[buffer_mod_count]*buffer_double[buffer_mod_count] + buffer_double[buffer_mod_count+1]*buffer_double[buffer_mod_count+1]);
 
-                // Adelantamos el index del buffer con un paso grande, submuestreando la salida real
-                // asi no colgamos el grafico con muchos puntos.
-                buffer_mod_count += 2^(POW_FFT_BUFFER-POW_FREC_SHOW);
-
-                // Borramos el dato
-                dataSet_frec.removeFirst();
-                // Agregamos un nuevo
-                dataSet_frec.addEntry(new Entry((float) aux_mod, i));
-            }
-
-            // Actualizamos el dataset
-            data_frec.removeDataSet(0);
-            data_frec.addDataSet(dataSet_frec);
-            grafico_frecuencia.setData(data_frec);
-
-            // Le avisamos que cambio y que lo actualice
-            data_frec.notifyDataChanged();
-            dataSet_frec.notifyDataSetChanged();
-            grafico_frecuencia.invalidate();
         }
 
+    }
 
+    private void updateFFT_values()
+    {
+        // obtenemos el modulo y mostramos en el grafico de FFT
+        int buffer_mod_count = 0;
+        for (int i = 0; i < BUFFER_SIZE_SHOW_FREQ; i++)
+        {
+            // calculamos el modulo
+            double aux_mod = sqrt(buffer_double[buffer_mod_count]*buffer_double[buffer_mod_count] + buffer_double[buffer_mod_count+1]*buffer_double[buffer_mod_count+1]);
 
+            // Adelantamos el index del buffer con un paso grande, submuestreando la salida real
+            // asi no colgamos el grafico con muchos puntos.
+            buffer_mod_count += 2^(POW_FFT_BUFFER-POW_FREC_SHOW);
 
+            // Borramos el dato
+            dataSet_frec.removeFirst();
+            // Agregamos un nuevo
+            dataSet_frec.addEntry(new Entry((float) aux_mod, i));
+        }
+
+        // Actualizamos el dataset
+        data_frec.removeDataSet(0);
+        data_frec.addDataSet(dataSet_frec);
+        grafico_frecuencia.setData(data_frec);
+
+        // Le avisamos que cambio y que lo actualice
+        data_frec.notifyDataChanged();
+        dataSet_frec.notifyDataSetChanged();
+        grafico_frecuencia.invalidate();
     }
 
 
