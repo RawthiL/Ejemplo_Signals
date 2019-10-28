@@ -14,6 +14,11 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Process;
+import android.view.View;
+import android.widget.Button;
+import android.widget.CompoundButton;
+import android.widget.Switch;
+import android.widget.TextView;
 import android.widget.Toast;
 
 
@@ -33,16 +38,16 @@ import static java.lang.Math.sqrt;
 
 public class MainActivity extends AppCompatActivity {
 
-    private boolean USE_CPP_FFT = true;
-    private boolean USE_JAVA_FFT = false;
+    //---------------------------------------------------------------------------------------
+    //-------------------------- Declaraciones Generales ------------------------------------
+    //---------------------------------------------------------------------------------------
 
-    static
-    {
-        System.loadLibrary("signal_proces-lib");
-    }// carga la libreria signal_proces-lib.so
-
-    private native String getNativeString(); // Esta funcion esta contenida en la libreria
-    private native double[] calcularFFT(short[] input, int elementos);
+    // Flags de control de la aplicacion
+    private boolean USE_CPP_FFT = false;
+    private boolean USE_JAVA_FFT = true;
+    private boolean stopped = true;
+    // Con este flag avisamos que hay data nueva a la FFT, es un semaforo mal hecho
+    boolean buffer_ready = false;
 
     // Defino los buffers, potencia de 2 para mas placer y por la FFT
     private int POW_FREC_SHOW = 10;
@@ -53,7 +58,26 @@ public class MainActivity extends AppCompatActivity {
     private int BUFFER_SIZE_SHOW_TIME = (int) Math.pow(2,POW_TIME_SHOW);
     private int BUFFER_SIZE = (int) Math.pow(2,POW_FFT_BUFFER);
 
+    // Contador de tiempo de ejecucion
+    private double time_exe = 0.0;
 
+    //---------------------------------------------------------------------------------------
+    //-------------------------- NATIVE Cpp -------------------------------------------------
+    //---------------------------------------------------------------------------------------
+    // Cargo la libreria en C nativo "signal_proces-lib.so" (la que hicimos acá)
+    static
+    {
+        System.loadLibrary("signal_proces-lib");
+    }
+
+    // Delcaro las funciones que voy a utilizar de la libreria
+    private native String getNativeString(); // Esta funcion esta contenida en la libreria
+    private native double[] calcularFFT(short[] input, int elementos);
+
+
+    //---------------------------------------------------------------------------------------
+    //-------------------------- Libreria FFT JAVA ------------------------------------------
+    //---------------------------------------------------------------------------------------
     // Creamos la clase para hacer la FFT
     // ver:  https://github.com/wendykierp/JTransforms
     // Para que esto ande debemos poner la ependencia en "build.gradle (Module: app)" :
@@ -64,23 +88,20 @@ public class MainActivity extends AppCompatActivity {
     double[] buffer_double = new double[BUFFER_SIZE];
 
 
+
+    //---------------------------------------------------------------------------------------
+    //-------------------------- Captura de audio -------------------------------------------
+    //---------------------------------------------------------------------------------------
     // Declaramos la clase para grabar audio
     private AudioRecord ar = null;
     private int SAMPLE_RATE = 44100; // en Hz
     // Buffer donde sale el valor crudo del microfono
     short[] buffer = new short[BUFFER_SIZE];
 
-    // Con este flag avisamos que hay data nueva a la FFT, es un semaforo mal hecho
-    boolean buffer_ready = false;
 
-    // Con esto activo o desactivo el funcionamiento del programa (todo)
-    boolean stopped = false;
-
-
-
-
-
-
+    //---------------------------------------------------------------------------------------
+    //-------------------------- Libreria de ploteo de señales ------------------------------
+    //---------------------------------------------------------------------------------------
     // Aca abajo van las declaraciones de ploteo....
     // ver: https://github.com/PhilJay/MPAndroidChart
     // Para que esto ande debemos poner la ependencia en "build.gradle (Module: app)" :
@@ -92,7 +113,6 @@ public class MainActivity extends AppCompatActivity {
     private int PLOTS_REFRESH_MS;
     // Esta variable la uso para recorrer la salida del microfono
     private int buffer_counter = 0;
-
 
     //  Creamos las clases del grafico de tiempo
     private LineChart grafico_tiempo;
@@ -109,6 +129,9 @@ public class MainActivity extends AppCompatActivity {
     LineData data_frec;
 
 
+    //---------------------------------------------------------------------------------------
+    //-------------------------- Permisos de audio ------------------------------------------
+    //---------------------------------------------------------------------------------------
     // Estas funciones de aca abajo salen de la documentación de Android, es un metodo
     // que pide permisos de microfono
 
@@ -141,32 +164,66 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        //------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------------------------
         // Bloqueamos la pantalla siempre en modo retrato
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
 
+        //------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------------------------
+        final Button boton_cal = findViewById(R.id.boton_act);
 
+        boton_cal.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                accion_boton_ini_fin();
+            }
+        });
 
+        final Switch switch_fft = findViewById(R.id.FFT_switch);
+        switch_fft.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
 
+                Context context = getApplicationContext();
+                CharSequence text;
 
-        Context context = getApplicationContext();
-        CharSequence text = getNativeString();
-        int duration = Toast.LENGTH_SHORT;
-
-        Toast toast = Toast.makeText(context, text, duration);
-        toast.show();
-
-
-
-
-
-
+                if (isChecked) {
+                    USE_CPP_FFT = true;
+                    USE_JAVA_FFT = false;
+                    text = "Usando FFT en C nativo.";
+                } else {
+                    USE_CPP_FFT = false;
+                    USE_JAVA_FFT = true;
+                    text = "Usando FFT en JAVA.";
+                }
+                int duration = Toast.LENGTH_SHORT;
+                Toast toast = Toast.makeText(context, text, duration);
+                toast.show();
+            }
+        });
+        //------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------------------------
         // Buscamos las implementaciones en el activity_main.xml de los dos graficos
         grafico_tiempo = findViewById(R.id.line_chart_tiempo);
         grafico_frecuencia = findViewById(R.id.line_chart_frecuencia);
 
+        //------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------------------------
         // Pedimos permiso para grabar audio
         ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION);
 
+        //------------------------------------------------------------------------------------------
+        //------------------------------------------------------------------------------------------
+        // Testeamos que se cargue bien la libreia nativa, mostrando una tostada...
+        Context context = getApplicationContext();
+        CharSequence text = getNativeString();
+        int duration = Toast.LENGTH_SHORT;
+        Toast toast = Toast.makeText(context, text, duration);
+        toast.show();
+
+        //------------------------------------------------------------------------------------------
+        //-------------------------- INICIALIZO LOS GRAFICOS ---------------------------------------
+        //------------------------------------------------------------------------------------------
         // Llenamos los buffers de señal a plotear con nada...
         for(int i=0;i<BUFFER_SIZE_SHOW_TIME;i++)
         {
@@ -178,7 +235,6 @@ public class MainActivity extends AppCompatActivity {
             LineEntry_frecuencia.add(new Entry(0.0f, i));
             labels_frecuencia.add(String.valueOf(i));
         }
-//
         // Cargamos los datos en la clase que grafica
         dataSet_frec = new LineDataSet(LineEntry_frecuencia, "Frecuencia");
         data_frec = new LineData(labels_frecuencia, dataSet_frec);
@@ -186,16 +242,13 @@ public class MainActivity extends AppCompatActivity {
         dataSet_tiempo = new LineDataSet(LineEntry_tiempo, "Tiempo");
         data_tiempo = new LineData(labels_tiempo, dataSet_tiempo);
 
-
         // Calculamos el tiempo de refresco de display para mostrar toda la señal antes que
         // se termine de grabar. No es en tiempo real, por lo que se ve mal a veces...
         PLOTS_REFRESH_MS = (int) ((((float)BUFFER_SIZE/(float)SAMPLE_RATE) / (float) BUFFER_SIZE_SHOW_TIME)*1000.0);
 
-
         // Seteamos los datos iniciales en los graficos
         grafico_tiempo.setData(data_tiempo);
         grafico_frecuencia.setData(data_frec);
-
 
         // Configuramos los ejes de los graficos (Esto es cosmetico mas que nada)
         XAxis xl = grafico_tiempo.getXAxis();
@@ -216,8 +269,6 @@ public class MainActivity extends AppCompatActivity {
 
         grafico_tiempo.setDescription("Señal temporal");
 
-
-
         XAxis xl_f = grafico_frecuencia.getXAxis();
         xl_f.setTextColor(Color.WHITE);
         xl_f.setDrawGridLines(true);
@@ -233,53 +284,65 @@ public class MainActivity extends AppCompatActivity {
         rightAxis_f.setEnabled(false);
 
         grafico_frecuencia.setDescription("FFT");
+        //------------------------------------------------------------------------------------------
+        //-------------------------- FIN INICIALIZACION DE GRAFICOS --------------------------------
+        //------------------------------------------------------------------------------------------
 
 
 
 
 
+
+
+        //------------------------------------------------------------------------------------------
+        //-------------------------- EJECUTO THREADS DE PROCESO ------------------------------------
+        //------------------------------------------------------------------------------------------
         // Como tiene que funcionar en paralelo, necesitamos un par de threads
 
+        //---------------------------------- CALCULO FFT ------------------------------------------
         // Este thread espera que el grabador de audio termine y hace la FFT. Solo mira el flag,
         // si esta en flase vuelve a dormir y si es true hace FFT.
+        // La FFT usada va a depender del checkbox, que setea el flag
         new Thread(new Runnable() {
 
             @Override
             public void run() {
 //                for(int i = 0; i < 500; i++) {
-                while (true) {
+                while (true)
+                {
+                    if(!stopped)
+                    {
+                        if (USE_JAVA_FFT)
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    calcFFT();
+                                }
+                            });
+                        else if (USE_CPP_FFT)
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {calcFFT_Cpp();
+                                }
+                            });
+                    }
 
-                    if (USE_JAVA_FFT)
-                        runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            calcFFT();
-                        }
-                    });
-                    else if (USE_CPP_FFT)
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                calcFFT_Cpp();
-                            }
-                        });
-
-                    try {
+                    // sleep
+                    try
+                    {
                         Thread.sleep(100);
-                    } catch (InterruptedException e) {
+                    }
+                    catch (InterruptedException e)
+                    {
+
                     }
                 }
             }
         }).start();
+        //------------------------------------------------------------------------------------------
 
-        // Este thread va a estar siempre grabando audio
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-               getTime();
-            }
-        }).start();
 
+        //---------------------------------- PLOT REFRESH ------------------------------------------
         // Con este thread vamos a refrescar los graficos con la nueva informacion
         new Thread(new Runnable() {
 
@@ -290,7 +353,8 @@ public class MainActivity extends AppCompatActivity {
 
                 while (true) {
 
-                    runOnUiThread(new Runnable() {
+                    if(!stopped)
+                        runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             mostrar_signals();
@@ -304,18 +368,112 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }).start();
+        //------------------------------------------------------------------------------------------
 
+
+        // Fin...
     }
 
 
+
+
+    // Metodos...
+
+
+    //----------------------------------------------------------------------------------------------
+    //------------------------------ Boton de iniciar / parar --------------------------------------
+    //----------------------------------------------------------------------------------------------
+    private void accion_boton_ini_fin()
+    {
+        boolean bail = false;
+        final Button testButton = findViewById(R.id.boton_act);
+        Switch fft_switch = findViewById(R.id.FFT_switch);
+
+        // Si estaba encendido, solo apago
+        if (!stopped)
+        {
+            stopped = true;
+            testButton.setText("Start");
+            return;
+        }
+
+
+        // Activo
+
+        // Seteo tipo FFT
+        if (fft_switch.isChecked())
+        {
+            USE_CPP_FFT = true;
+            USE_JAVA_FFT = false;
+        }
+        else
+        {
+            USE_CPP_FFT = false;
+            USE_JAVA_FFT = true;
+        }
+
+
+        // Informo que tipo de FFT voy a usar
+        Context context = getApplicationContext();
+        CharSequence text;
+        if (USE_CPP_FFT)
+            text = "Usando FFT en C nativo.";
+        else if (USE_JAVA_FFT)
+            text = "Usando FFT en JAVA.";
+        else
+        {
+            text = "¿No seleecionaste FFT? ¡¡¿como llegue acá?!!";
+            bail = true;
+        }
+
+        // Muestro tostada con información
+        int duration = Toast.LENGTH_LONG;
+        Toast toast = Toast.makeText(context, text, duration);
+        toast.show();
+
+
+
+        // Si algo salio mal, no activo.
+        if (bail)
+            return;
+
+
+        //---------------------------------- EJECUTO EL THREAD DE AUDIO RECORDER -------------------
+        stopped = false;
+        // Este thread va a estar siempre grabando audio
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                getTime();
+            }
+        }).start();
+
+        testButton.setText("Stop");
+
+
+        return;
+
+    }
+
+    //----------------------------------------------------------------------------------------------
+    //------------------------------ CALC FFT - Cpp ------------------------------------------------
+    //----------------------------------------------------------------------------------------------
     // Este método hace la FFT, en Cpp
     private void calcFFT_Cpp()
     {
         // Solo si hay nuevos datos en el buffer...
         if (buffer_ready)
         {
+
+            long startTime = System.currentTimeMillis();
+
+            // Calculo FFT en la libreria de C
             buffer_double = calcularFFT(buffer, BUFFER_SIZE);
 
+            time_exe = System.currentTimeMillis() - startTime;
+            // Actualizo el tiempo de calculo
+
+            // Actualizo plot
             updateFFT_values();
 
             // Terminamos de procesar el buffer, reseteamos el flag
@@ -324,13 +482,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-
+    //----------------------------------------------------------------------------------------------
+    //------------------------------ CALC FFT - JAVA -----------------------------------------------
+    //----------------------------------------------------------------------------------------------
     // Este método hace la FFT
     private void calcFFT()
     {
         // Solo si hay nuevos datos en el buffer...
         if (buffer_ready)
         {
+
+            long startTime = System.currentTimeMillis();
+
             // Pasamos a double como quiere la clase FFT
             for (int i = 0; i < BUFFER_SIZE; i++)
             {
@@ -341,17 +504,19 @@ public class MainActivity extends AppCompatActivity {
             // real (izquierda) de la FFT, intercalando la salida real y la imaginaria.
             fft.realForward(buffer_double);
 
+            time_exe = System.currentTimeMillis() - startTime;
 
+            // Actualizo plot
             updateFFT_values();
 
             // Terminamos de procesar el buffer, reseteamos el flag
             buffer_ready = false;
-
-
         }
-
     }
 
+    //----------------------------------------------------------------------------------------------
+    //------------------------------ Actualizar grafico FFT ----------------------------------------
+    //----------------------------------------------------------------------------------------------
     private void updateFFT_values()
     {
         // obtenemos el modulo y mostramos en el grafico de FFT
@@ -380,9 +545,17 @@ public class MainActivity extends AppCompatActivity {
         data_frec.notifyDataChanged();
         dataSet_frec.notifyDataSetChanged();
         grafico_frecuencia.invalidate();
+
+        // Actualizo el texto del tiempo de calculo
+        final TextView texto_tiempo = findViewById(R.id.text_time);
+        texto_tiempo.setText("Tiempo calc. = "+time_exe+" ms");
+
     }
 
 
+    //----------------------------------------------------------------------------------------------
+    //------------------------------ CAPTURAR AUDIO ------------------------------------------------
+    //----------------------------------------------------------------------------------------------
     private void getTime()
     {
 
@@ -423,7 +596,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-
+    //----------------------------------------------------------------------------------------------
+    //------------------------------ ACTUALIZAR PLOTS EN PANTALLA ----------------------------------
+    //----------------------------------------------------------------------------------------------
     private void mostrar_signals()
     {
 
@@ -453,5 +628,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
     }
+
+
 
 }

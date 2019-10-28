@@ -18,9 +18,9 @@ extern "C"
 JNIEXPORT jstring JNICALL Java_com_atleastitworks_ejemplo_1signals_MainActivity_getNativeString(
         JNIEnv *env, jobject obj) {
 
-    cout << "Hello World from C++!" << endl;
+    cout << "Libreria en C++ nativo funcionando!" << endl;
 
-    return env->NewStringUTF("Hello World! From native code!");
+    return env->NewStringUTF("Libreria en C++ nativo funcionando!");
 }
 
 
