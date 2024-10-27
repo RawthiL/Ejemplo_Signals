@@ -46,8 +46,21 @@ JNIEXPORT jdoubleArray JNICALL Java_com_atleastitworks_ejemplo_1signals_MainActi
     for (int i = 0 ; i < elementos ; i++)
         val_real[i] = (double) entrada_short[i];
 
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+
     // Calculo la FFT
     Fft_transform(val_real, val_img, elementos);
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    // Calculate the duration
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
+
+    // Convert the duration to a double in seconds
+    double seconds = duration.count() / 1e6;
+
+    // Print the elapsed time
+    std::cout << "Time elapsed: " << seconds << " seconds" << std::endl;
 
 
     // Declaro la salida

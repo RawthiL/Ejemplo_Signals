@@ -7,7 +7,7 @@
 #endif //EJEMPLO_SIGNALS_SIGNAL_PROCES_LIB_HPP
 
 // Esto lo agrega solo el sandroid studio...
-#include "../../../../../../../../../Android/Sdk/ndk/20.0.5594570/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/jni.h"
+#include <jni.h>
 
 extern "C" {
 JNIEXPORT jstring JNICALL Java_com_atleastitworks_ejemplo_1signals_MainActivity_getNativeString(
