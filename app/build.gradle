@@ -2,7 +2,6 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 29
-    buildToolsVersion "29.0.2"
     defaultConfig {
         applicationId "com.atleastitworks.ejemplo_signals"
         minSdkVersion 15
@@ -26,6 +25,7 @@ android {
     repositories {
         maven { url "https://jitpack.io" }
     }
+    namespace 'com.atleastitworks.ejemplo_signals'
 }
 
 dependencies {
